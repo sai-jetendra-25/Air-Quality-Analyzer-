@@ -1,0 +1,187 @@
+#define BLYNK_TEMPLATE_ID "Template Id"
+#define BLYNK_TEMPLATE_NAME "Air Quality Monitoring"
+#define BLYNK_AUTH_TOKEN "Token id "
+
+#define BLYNK_PRINT Serial
+
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <DHT.h>
+
+// ===== LCD =====
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+
+// ===== WiFi =====
+char ssid[] = "Wifi-Name";
+char pass[] = "Wifi-password";
+
+// ===== DHT11 =====
+#define DHTPIN 4
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+// ===== MQ135 =====
+#define MQ_PIN 34
+
+int slide = 0;
+BlynkTimer timer;
+
+// ===== AQI CATEGORY =====
+String getAQIStatus(int aqi) {
+  if (aqi <= 50) return "GOOD";
+  else if (aqi <= 100) return "MODERATE";
+  else if (aqi <= 150) return "POOR";
+  else if (aqi <= 200) return "UNHEALTHY";
+  else if (aqi <= 300) return "SEVERE";
+  else return "HAZARDOUS";
+}
+
+// ===== Temperature Status =====
+String getTempStatus(float t) {
+  if (t > 35) return "HIGH";
+  else if (t < 18) return "LOW";
+  else return "NORMAL";
+}
+
+// ===== Humidity Status =====
+String getHumStatus(float h) {
+  if (h > 70) return "HIGH";
+  else if (h < 30) return "LOW";
+  else return "NORMAL";
+}
+
+// ===== MAIN FUNCTION =====
+void displaySlides() {
+
+  // Read Sensors
+  int mq = analogRead(MQ_PIN);
+  int aqi = map(mq, 0, 4095, 0, 500);
+  aqi = constrain(aqi, 0, 500);
+
+  float humidity = dht.readHumidity();
+  float temperature = dht.readTemperature();
+
+  if (isnan(humidity) || isnan(temperature)) return;
+
+  // Status Values
+  String aqiStatus = getAQIStatus(aqi);
+  String tempStatus = getTempStatus(temperature);
+  String humStatus = getHumStatus(humidity);
+
+  // Send to Blynk ONLY if connected
+  if (WiFi.status() == WL_CONNECTED && Blynk.connected()) {
+    Blynk.virtualWrite(V0, temperature);
+    Blynk.virtualWrite(V1, humidity);
+    Blynk.virtualWrite(V2, aqi);
+    Blynk.virtualWrite(V3, aqiStatus);
+  }
+
+  // LCD Display
+  lcd.clear();
+
+  // ----- SLIDE 0 → INTRO -----
+  if (slide == 0) {
+    lcd.setCursor(0, 0);
+    lcd.print("  IOT-BASED SYSTEM ");
+    lcd.setCursor(0, 1);
+    lcd.print("AIR QUALITY ");
+    lcd.setCursor(0, 2);
+    lcd.print("TEMPERATURE AND ");
+    lcd.setCursor(0, 3);
+    lcd.print("HUMIDITY ANALYZER  ");
+  }
+
+  // ----- SLIDE 1 → AQI -----
+  else if (slide == 1) {
+    lcd.setCursor(0, 0);
+    lcd.print("  AIR QUALITY INDEX  ");
+
+    lcd.setCursor(0, 1);
+    lcd.print("AQI : ");
+    lcd.print(aqi);
+
+    lcd.setCursor(0, 2);
+    lcd.print("Status : ");
+    lcd.print(aqiStatus);
+  }
+
+  // ----- SLIDE 2 → TEMPERATURE -----
+  else if (slide == 2) {
+    lcd.setCursor(0, 0);
+    lcd.print(" TEMPERATURE INDEX ");
+
+    lcd.setCursor(0, 1);
+    lcd.print("Temperature : ");
+    lcd.print(temperature);
+    lcd.print("C");
+
+    lcd.setCursor(0, 2);
+    lcd.print("Status : ");
+    lcd.print(tempStatus);
+  }
+
+  // ----- SLIDE 3 → HUMIDITY -----
+  else if (slide == 3) {
+    lcd.setCursor(0, 0);
+    lcd.print("   HUMIDITY INDEX   ");
+
+    lcd.setCursor(0, 1);
+    lcd.print("Humidity : ");
+    lcd.print(humidity);
+    lcd.print("%");
+
+    lcd.setCursor(0, 2);
+    lcd.print("Status : ");
+    lcd.print(humStatus);
+  }
+
+  slide++;
+  if (slide > 3) slide = 0;
+}
+
+// ===================================
+
+void setup() {
+  Serial.begin(115200);
+
+  lcd.init();
+  lcd.begin(20, 4);
+  lcd.backlight();
+
+  dht.begin();
+
+  // ===== WiFi Connection with Timeout =====
+  WiFi.begin(ssid, pass);
+  Serial.println("Connecting to WiFi...");
+
+  unsigned long startTime = millis();
+
+  while (WiFi.status() != WL_CONNECTED && millis() - startTime < 10000) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi Connected!");
+    Serial.println(WiFi.localIP());
+
+    // Start Blynk
+    Blynk.config(BLYNK_AUTH_TOKEN);
+    Blynk.connect(5000);
+  } else {
+    Serial.println("\nWiFi Failed! Running Offline Mode...");
+  }
+
+  timer.setInterval(3000L, displaySlides);
+}
+
+// ===================================
+
+void loop() {
+  if (WiFi.status() == WL_CONNECTED) {
+    Blynk.run();
+  }
+  timer.run();
+}
